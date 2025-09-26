@@ -1,0 +1,15 @@
+# Analytics Dashboard Dependencies
+streamlit>=1.28.0
+plotly>=5.17.0
+pandas>=2.0.0
+numpy>=1.24.0
+networkx>=3.1
+requests>=2.31.0
+
+# Additional visualization libraries
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Data processing
+scipy>=1.11.0
+scikit-learn>=1.3.0
