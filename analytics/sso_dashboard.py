@@ -1,6 +1,6 @@
 """
-Secure RedHat LDAP Analytics Dashboard
-Enhanced with authentication, authorization, and audit logging
+Red Hat SSO Enabled Analytics Dashboard
+Enterprise-grade authentication with Red Hat Single Sign-On
 """
 
 import streamlit as st
@@ -13,34 +13,28 @@ from datetime import datetime, timedelta
 import sys
 import os
 
-# Security imports
-from auth import auth
-from audit_logger import audit_logger
-from data_security import data_security
-from secure_config import secure_config
-
 # Add current directory to path
 sys.path.append(os.path.dirname(__file__))
 
-# Import our data collector
+# Import our modules
 try:
     from mcp_data_collector import MCPDataCollector
-except ImportError:
-    st.error("Failed to import MCPDataCollector. Make sure the module is available.")
+    from rh_sso_auth import rh_sso_auth
+    from audit_logger import audit_logger
+    from data_security import data_security
+except ImportError as e:
+    st.error(f"Failed to import required modules: {e}")
     st.stop()
 
 # Page configuration
 st.set_page_config(
-    page_title="RedHat LDAP Analytics - Secure",
+    page_title="RedHat LDAP Analytics - SSO",
     page_icon="🔐",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Load secure configuration
-config = secure_config.load_config()
-
-# Custom CSS for security styling
+# Custom CSS for Red Hat branding
 st.markdown("""
 <style>
     .main-header {
@@ -49,7 +43,7 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    .security-banner {
+    .sso-banner {
         background: linear-gradient(90deg, #ee0000, #cc0000);
         color: white;
         padding: 0.5rem;
@@ -57,6 +51,13 @@ st.markdown("""
         font-weight: bold;
         margin-bottom: 1rem;
         border-radius: 0.25rem;
+    }
+    .user-info {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #ee0000;
+        margin-bottom: 1rem;
     }
     .metric-card {
         background-color: #f0f2f6;
@@ -74,20 +75,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def check_session_security():
-    """Enhanced session security checks"""
-    # Check for session hijacking
-    if 'session_fingerprint' not in st.session_state:
-        st.session_state['session_fingerprint'] = hash(str(datetime.now()))
-
-    # Log session activity
-    audit_logger.log_session_activity('page_access', {'page': 'dashboard'})
+    """Enhanced session security checks for SSO"""
+    user = rh_sso_auth.get_current_user()
+    if user:
+        # Log session activity
+        audit_logger.log_session_activity('page_access', {
+            'page': 'sso_dashboard',
+            'sso_user': user.get('username', ''),
+            'role': user.get('role', ''),
+            'auth_method': 'red_hat_sso'
+        })
 
 @st.cache_data(ttl=1800)  # Cache for 30 minutes
 def load_secure_data(user_role: str, user_context: dict):
-    """Load and cache LDAP data with security controls"""
+    """Load and cache LDAP data with SSO security controls"""
     try:
-        # Log data access
-        audit_logger.log_data_access('people_data', {'user_role': user_role})
+        # Log data access with SSO context
+        audit_logger.log_data_access('people_data', {
+            'user_role': user_role,
+            'sso_user': user_context.get('username', ''),
+            'auth_method': 'red_hat_sso'
+        })
 
         collector = MCPDataCollector()
 
@@ -98,15 +106,15 @@ def load_secure_data(user_role: str, user_context: dict):
         geo_map_df = collector.collect_geo_map_data()
         summary = collector.get_analytics_summary()
 
-        # Apply security filters
+        # Apply security filters based on SSO roles
         people_df = data_security.filter_data_by_access_level(people_df, user_role, user_context)
         people_df = data_security.apply_data_masking(people_df, user_role)
 
         return people_df, location_df, geo_df, geo_map_df, summary
     except Exception as e:
-        audit_logger.log_security_event(f"Data loading error: {e}", 'ERROR')
+        audit_logger.log_security_event(f"SSO Data loading error: {e}", 'ERROR')
         st.error(f"Error loading data: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), {}
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), {}
 
 def create_seniority_charts(people_df):
     """Create seniority distribution charts"""
@@ -151,36 +159,13 @@ def create_seniority_charts(people_df):
 
     return fig
 
-def create_secure_export(df: pd.DataFrame, export_format: str, user_role: str):
-    """Create secure data export with audit logging"""
-    if not data_security.check_data_access_permission('export', user_role,
-                                                     st.session_state.get('user', {}).get('permissions', [])):
-        st.error("❌ You don't have permission to export data")
-        return
-
-    # Sanitize data for export
-    sanitized_df = data_security.sanitize_export_data(df, export_format, user_role)
-
-    # Log export
-    audit_logger.log_data_export('people_data', len(sanitized_df), export_format)
-
-    # Create download
-    if export_format.lower() == 'csv':
-        csv_data = sanitized_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download CSV",
-            data=csv_data,
-            file_name=f"ldap_analytics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-
 def create_team_geomap(geo_map_df):
     """Create interactive geographic map of team locations"""
     if geo_map_df.empty:
         return None
 
-    # Create scatter mapbox plot
-    fig = px.scatter_mapbox(
+    # Create scatter map plot
+    fig = px.scatter_map(
         geo_map_df,
         lat='latitude',
         lon='longitude',
@@ -211,39 +196,100 @@ def create_team_geomap(geo_map_df):
 
     return fig
 
-def main():
-    """Main secure dashboard function"""
+def create_secure_export(df: pd.DataFrame, export_format: str, user_role: str, user_context: dict):
+    """Create secure data export with SSO audit logging"""
+    if not data_security.check_data_access_permission('export', user_role,
+                                                     user_context.get('permissions', [])):
+        st.error("❌ You don't have permission to export data")
+        return
 
-    # Security banner
-    st.markdown('<div class="security-banner">🔐 SECURE ACCESS - CONFIDENTIAL DATA - RED HAT INTERNAL</div>',
+    # Sanitize data for export
+    sanitized_df = data_security.sanitize_export_data(df, export_format, user_role)
+
+    # Log export with SSO context
+    audit_logger.log_data_export('people_data', len(sanitized_df), export_format)
+    audit_logger.log_session_activity('data_export', {
+        'sso_user': user_context.get('username', ''),
+        'role': user_role,
+        'record_count': len(sanitized_df),
+        'format': export_format
+    })
+
+    # Create download
+    if export_format.lower() == 'csv':
+        csv_data = sanitized_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv_data,
+            file_name=f"ldap_analytics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+
+def display_user_info_banner(user: dict):
+    """Display user information banner with SSO details"""
+    st.markdown('<div class="sso-banner">🔐 RED HAT SSO AUTHENTICATED SESSION</div>',
                 unsafe_allow_html=True)
 
-    # Authentication check
-    auth.require_auth()
+    col1, col2, col3 = st.columns([2, 1, 1])
+
+    with col1:
+        st.markdown(f"""
+        <div class="user-info">
+        <strong>👤 {user.get('name', 'Unknown User')}</strong><br>
+        📧 {user.get('email', 'No email')}<br>
+        🏷️ Role: {user.get('role', 'viewer').title()}<br>
+        🔑 Auth: Red Hat SSO
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        if st.button("🔄 Refresh Session"):
+            st.cache_data.clear()
+            st.rerun()
+
+    with col3:
+        if st.button("🚪 SSO Logout"):
+            audit_logger.log_session_activity('sso_logout', {
+                'sso_user': user.get('username', ''),
+                'role': user.get('role', '')
+            })
+            rh_sso_auth.logout()
+
+def main():
+    """Main SSO dashboard function"""
+
+    # Require SSO authentication
+    rh_sso_auth.require_sso_auth()
 
     # Additional security checks
     check_session_security()
 
     # Get user context
-    user = st.session_state.get('user', {})
+    user = rh_sso_auth.get_current_user()
+    if not user:
+        st.error("❌ SSO session not found")
+        st.stop()
+
     user_role = user.get('role', 'viewer')
     user_name = user.get('name', 'Unknown')
 
-    # Header with user info
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown('<h1 class="main-header">🔐 RedHat LDAP Analytics Dashboard</h1>',
-                   unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"**Welcome, {user_name}**")
-        st.markdown(f"Role: `{user_role.title()}`")
-        if st.button("🚪 Logout"):
-            audit_logger.log_session_activity('logout')
-            auth.logout()
+    # Display user info banner
+    display_user_info_banner(user)
 
-    # Sidebar with security info
-    st.sidebar.markdown('<div class="sidebar-info">🛡️ <strong>Security Status</strong><br>All access is monitored and logged</div>',
-                       unsafe_allow_html=True)
+    # Header
+    st.markdown('<h1 class="main-header">🔐 RedHat LDAP Analytics - SSO Enterprise</h1>',
+               unsafe_allow_html=True)
+
+    # Sidebar with SSO info
+    st.sidebar.markdown(f'''
+    <div class="sidebar-info">
+    <strong>🏢 Red Hat SSO</strong><br>
+    User: {user.get('username', 'unknown')}<br>
+    Role: {user_role.title()}<br>
+    Groups: {', '.join(user.get('groups', [])[:3])}<br>
+    🛡️ All access monitored
+    </div>
+    ''', unsafe_allow_html=True)
 
     # Permission-based feature controls
     if not data_security.check_data_access_permission('analytics', user_role, user.get('permissions', [])):
@@ -253,11 +299,11 @@ def main():
     # Data refresh controls
     st.sidebar.subheader("Data Controls")
     if st.sidebar.button("🔄 Refresh Data"):
-        audit_logger.log_session_activity('data_refresh')
+        audit_logger.log_session_activity('data_refresh', {'sso_user': user.get('username', '')})
         st.cache_data.clear()
         st.rerun()
 
-    # Load data with security
+    # Load data with SSO security
     with st.spinner("Loading secure data..."):
         people_df, location_df, geo_df, geo_map_df, summary = load_secure_data(user_role, user)
 
@@ -300,7 +346,7 @@ def main():
                 else:
                     st.metric("Manager:Employee", "N/A")
             else:
-                st.metric("Access Level", "RESTRICTED")
+                st.metric("SSO Status", "AUTHENTICATED")
 
         with col5:
             locations_count = len(summary.get('location_distribution', {}))
@@ -322,7 +368,10 @@ def main():
                     geomap_fig = create_team_geomap(geo_map_df)
                     if geomap_fig:
                         st.plotly_chart(geomap_fig, config={'displayModeBar': False}, width='stretch')
-                        audit_logger.log_session_activity('viewed_geomap', {'user_role': user_role})
+                        audit_logger.log_session_activity('viewed_geomap', {
+                            'user_role': user_role,
+                            'sso_user': user.get('username', '')
+                        })
                     else:
                         st.info("Geographic map not available")
 
@@ -332,7 +381,7 @@ def main():
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.button("Export as CSV"):
-                        create_secure_export(people_df, 'csv', user_role)
+                        create_secure_export(people_df, 'csv', user_role, user)
                 with col2:
                     st.info("Exports are logged and audited")
 
@@ -345,26 +394,26 @@ def main():
 
         with tab1:
             if not people_df.empty:
-                st.dataframe(people_df, use_container_width=True)
+                st.dataframe(people_df, width='stretch')
             else:
                 st.info("No people data available")
 
         with tab2:
             if not location_df.empty:
-                st.dataframe(location_df, use_container_width=True)
+                st.dataframe(location_df, width='stretch')
             else:
                 st.info("No location data available")
 
         with tab3:
             if not geo_df.empty:
-                st.dataframe(geo_df, use_container_width=True)
+                st.dataframe(geo_df, width='stretch')
             else:
                 st.info("No geographic data available")
 
     elif user_role == 'manager':
         # Managers see limited data
         if not people_df.empty:
-            st.dataframe(people_df, use_container_width=True)
+            st.dataframe(people_df, width='stretch')
         else:
             st.info("No team data available")
 
@@ -375,23 +424,27 @@ def main():
         else:
             st.info("Summary data not available")
 
-    # Footer with security info
+    # Footer with SSO info
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("🔧 **RedHat LDAP Analytics Dashboard** | Secured with Authentication & Audit Logging")
+        st.markdown("🔧 **RedHat LDAP Analytics Dashboard** | Secured with Red Hat SSO")
     with col2:
         if summary.get('last_updated'):
             st.markdown(f"Last updated: {summary['last_updated']}")
 
     # Session info for admins
     if user_role == 'admin':
-        with st.expander("🔍 Session Information"):
+        with st.expander("🔍 SSO Session Information"):
             st.json({
-                'user': user_name,
+                'sso_username': user.get('username', ''),
+                'name': user_name,
+                'email': user.get('email', ''),
                 'role': user_role,
                 'permissions': user.get('permissions', []),
-                'session_start': st.session_state.get('session_start', 'Unknown'),
+                'groups': user.get('groups', []),
+                'session_start': user.get('session_start', 'Unknown'),
+                'auth_method': 'red_hat_sso',
                 'data_classification': 'CONFIDENTIAL'
             })
 

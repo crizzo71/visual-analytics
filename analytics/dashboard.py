@@ -250,7 +250,7 @@ def main():
     st.subheader("📊 Key Metrics")
 
     if summary:
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             st.metric("Total People", summary.get('total_people', 'N/A'))
@@ -263,6 +263,16 @@ def main():
             st.metric("Manager Ratio", f"{manager_ratio:.1f}%")
 
         with col4:
+            # Manager to Employee Ratio (1 manager for X employees)
+            total_people = summary.get('total_people', 1)
+            manager_count = summary.get('manager_count', 0)
+            if manager_count > 0:
+                employee_per_manager = (total_people - manager_count) / manager_count
+                st.metric("Manager:Employee", f"1:{employee_per_manager:.0f}")
+            else:
+                st.metric("Manager:Employee", "N/A")
+
+        with col5:
             locations_count = len(summary.get('location_distribution', {}))
             st.metric("Locations", locations_count)
 
@@ -271,14 +281,14 @@ def main():
 
     # Seniority Analysis
     if not people_df.empty:
-        st.plotly_chart(create_seniority_charts(people_df), width='stretch')
+        st.plotly_chart(create_seniority_charts(people_df), config={'displayModeBar': False}, width='stretch')
 
         # Geographic Map Section
         st.subheader("🌍 Global Team Map")
         if not geo_map_df.empty:
             geomap_fig = create_team_geomap(geo_map_df)
             if geomap_fig:
-                st.plotly_chart(geomap_fig, width='stretch')
+                st.plotly_chart(geomap_fig, config={'displayModeBar': False}, width='stretch')
             else:
                 st.info("Geographic map not available")
 
@@ -288,11 +298,11 @@ def main():
             with col1:
                 regional_fig = create_regional_breakdown(people_df)
                 if regional_fig:
-                    st.plotly_chart(regional_fig, width='stretch')
+                    st.plotly_chart(regional_fig, config={'displayModeBar': False}, width='stretch')
 
             with col2:
                 if not location_df.empty:
-                    st.plotly_chart(create_location_map(location_df), width='stretch')
+                    st.plotly_chart(create_location_map(location_df), config={'displayModeBar': False}, width='stretch')
                 else:
                     st.info("Location data not available")
 
@@ -301,7 +311,7 @@ def main():
         col1, col2 = st.columns(2)
 
         with col1:
-            st.plotly_chart(create_department_analysis(people_df), width='stretch')
+            st.plotly_chart(create_department_analysis(people_df), config={'displayModeBar': False}, width='stretch')
 
         with col2:
             # Show geographic statistics
